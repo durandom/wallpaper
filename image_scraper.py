@@ -6,6 +6,7 @@ from io import BytesIO
 import requests
 from PIL import Image
 import os
+import re
 from google_images_search import GoogleImagesSearch
 from time import sleep
 
@@ -14,6 +15,33 @@ from time import sleep
 # GOOGLE_SEARCH_CX - from Google Programmable Search Engine
 GCS_DEVELOPER_KEY = os.getenv('GCS_DEVELOPER_KEY')
 GCS_CX = os.getenv('GCS_CX')
+
+def sanitize_filename(filename):
+    """Remove invalid characters from filename"""
+    return re.sub(r'[<>:"/\\|?*]', '_', filename)
+
+def download_image(url, folder, index):
+    """Download image from URL and save to folder"""
+    try:
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            # Get file extension from content-type or fallback to .jpg
+            content_type = response.headers.get('content-type', '')
+            ext = '.jpg'
+            if 'png' in content_type.lower():
+                ext = '.png'
+            elif 'jpeg' in content_type.lower() or 'jpg' in content_type.lower():
+                ext = '.jpg'
+
+            filename = f"image_{index + 1}{ext}"
+            filepath = os.path.join(folder, filename)
+
+            with open(filepath, 'wb') as f:
+                f.write(response.content)
+            return True
+    except Exception as e:
+        print(f"Error downloading image: {str(e)}", file=sys.stderr)
+    return False
 
 def check_image_resolution(url, min_width, min_height):
     try:
@@ -62,7 +90,11 @@ def main():
             # Search for images
             gis.search(search_params)
 
-            # Filter and print results
+            # Create folder for saving images
+            folder_name = sanitize_filename(args.search_term)
+            os.makedirs(folder_name, exist_ok=True)
+
+            # Filter and save results
             results_found = 0
             for image in gis.results():
                 if results_found >= args.max_results:
@@ -70,10 +102,12 @@ def main():
 
                 url = image.url
                 if check_image_resolution(url, min_width, min_height):
-                    print(url)
-                    results_found += 1
+                    print(f"Downloading: {url}")
+                    if download_image(url, folder_name, results_found):
+                        results_found += 1
 
             if results_found > 0:
+                print(f"\nSaved {results_found} images to folder: {folder_name}")
                 break
             elif attempt < max_retries - 1:
                 print(f"No suitable images found, retrying... (attempt {attempt + 1}/{max_retries})",
